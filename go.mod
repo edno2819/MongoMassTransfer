@@ -1,4 +1,4 @@
-module github.com/edno2819/go-examples
+module github.com/edno2819/mongo-mass-transfer
 
 go 1.22.3
 

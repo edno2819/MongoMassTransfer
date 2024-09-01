@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/edno2819/go-examples/src/utils"
+	"github.com/edno2819/mongo-mass-transfer/src/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
