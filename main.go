@@ -1,27 +1,33 @@
 package main
 
 import (
-	"encoding/csv"
-	"io"
+	"context"
 	"log"
-	"os"
 	"runtime"
 	"sync"
-	"time"
 
-	middlewares "github.com/edno2819/go-examples/src/handlers"
+	"github.com/edno2819/go-examples/src/database"
 	"github.com/edno2819/go-examples/src/utils"
 	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const Repeater int = 10
-const ChunkSize int = 500
-const MaxSizeRowsBuffer int16 = 500
-const MaxSizeDataProcessedBuffer int16 = 50
-const PathFile string = "tmp/stock.csv"
+const (
+	Repeater                   int    = 50
+	ChunkSize                  int    = 3000
+	MaxSizeRowsBuffer          int16  = 5000
+	MaxSizeDataProcessedBuffer int16  = 5000
+	PathFile                   string = "tmp/stock.csv"
+)
+
+var (
+	qtdSaved   int
+	mu         sync.Mutex
+	Collection *mongo.Collection
+)
 
 func init() {
-	middlewares.DotEnvVariable("")
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 
 	err := godotenv.Load()
@@ -31,54 +37,41 @@ func init() {
 	utils.PrintBeaultifull()
 }
 
-func ReadCSV(filePath string, channel chan<- interface{}, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	rowCount := 0
-	for i := 0; i < Repeater; i++ {
-		file, err := os.Open(filePath)
-		if err != nil {
-			log.Fatalf("could not open file: %v", err)
-			return
-		}
-
-		reader := csv.NewReader(file)
-		for {
-			rec, err := reader.Read()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				log.Fatal(err)
-			}
-			channel <- rec
-			rowCount++
-		}
-
-		file.Close()
-	}
-
-	log.Printf("Total rows Loaded: %d\n", rowCount)
-	close(channel)
+func getCollection() *mongo.Collection {
+	client := database.DbConnect()
+	return client.Database("Logs").Collection("TestGoMass")
 }
 
 func processRow(rowsChannel <-chan interface{}, dataProcessedChannel chan<- interface{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for data := range rowsChannel {
-		time.Sleep(70 * time.Microsecond)
-		dataProcessedChannel <- data
+		row := data.([]string)
+		// Mapeia os campos para os nomes das colunas do MongoDB (ajuste conforme necessário)
+		document := map[string]interface{}{
+			"data":      row[0],
+			"loja":      row[1],
+			"idProduct": row[2],
+		}
+		dataProcessedChannel <- document
 	}
 }
 
-func saveChunk(chunk []interface{}, qtdSaved *int, wg *sync.WaitGroup) {
+func saveChunk(chunk []interface{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	time.Sleep(1200 * time.Millisecond)
-	*qtdSaved += len(chunk)
+	_, err := Collection.InsertMany(context.TODO(), chunk, options.InsertMany())
+	if err != nil {
+		log.Printf("Error inserting chunck %v", err)
+		return
+	}
+
+	mu.Lock()
+	qtdSaved += len(chunk)
+	mu.Unlock()
 	log.Printf("Salvando chunk de %d items", len(chunk))
 }
 
-func insertChunk(dataProcessedChannel <-chan interface{}, wg *sync.WaitGroup, qtdSaved *int) {
+func insertChunk(dataProcessedChannel <-chan interface{}, wg *sync.WaitGroup) {
 	var chunk []interface{}
 	defer wg.Done()
 
@@ -86,7 +79,7 @@ func insertChunk(dataProcessedChannel <-chan interface{}, wg *sync.WaitGroup, qt
 		chunk = append(chunk, data)
 		if len(chunk) >= ChunkSize {
 			wg.Add(1)
-			go saveChunk(chunk, qtdSaved, wg)
+			go saveChunk(chunk, wg)
 			chunk = make([]interface{}, 0)
 		}
 	}
@@ -96,12 +89,12 @@ func insertChunk(dataProcessedChannel <-chan interface{}, wg *sync.WaitGroup, qt
 	// Salva o último chunk, se houver
 	if len(chunk) > 0 {
 		wg.Add(1)
-		go saveChunk(chunk, qtdSaved, wg)
+		go saveChunk(chunk, wg)
 	}
 }
 
 func main() {
-	var qtdSaved int = 0
+	Collection = getCollection()
 
 	rowsChannel := make(chan interface{}, MaxSizeRowsBuffer)
 	dataProcessedChannel := make(chan interface{}, MaxSizeDataProcessedBuffer)
@@ -110,7 +103,7 @@ func main() {
 	var wgSave sync.WaitGroup
 
 	wg.Add(1)
-	go ReadCSV(PathFile, rowsChannel, &wg)
+	go utils.ReadCSV(PathFile, rowsChannel, &wg)
 
 	numWorkers := runtime.NumCPU()
 	for c := 0; c < numWorkers; c++ {
@@ -119,7 +112,7 @@ func main() {
 	}
 
 	wgSave.Add(1)
-	go insertChunk(dataProcessedChannel, &wgSave, &qtdSaved)
+	go insertChunk(dataProcessedChannel, &wgSave)
 
 	wg.Wait()
 	close(dataProcessedChannel)

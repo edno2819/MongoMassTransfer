@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
+	"github.com/edno2819/go-examples/src/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -15,18 +15,17 @@ import (
 func DbConnect() *mongo.Client {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	fmt.Println()
 
-	clientOptions := options.Client().ApplyURI(os.Getenv("UPLAN_URI_MONGO"))
+	clientOptions := options.Client().ApplyURI(utils.GetEnvVariable("UPLAN_URI_MONGO"))
 
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Falha ao conectar ao MongoDB:", err)
 	}
 
 	err = client.Ping(context.TODO(), nil)
 	if err != nil {
-		log.Fatal("Falha ao conectar ao MongoDB:", err)
+		log.Fatal("Falha na conexão MongoDB:", err)
 	}
 
 	log.Println("Conectado ao MongoDB!")

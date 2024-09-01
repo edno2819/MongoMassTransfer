@@ -6,8 +6,23 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 	"sync"
 )
+
+var (
+	Repeater int
+)
+
+func init() {
+	repeaterStr := GetEnvVariableDef("REPETER", "50")
+	value, err := strconv.Atoi(repeaterStr)
+	if err != nil {
+		log.Printf("Error converting REPETER to int: %v", err)
+		Repeater = 10
+	}
+	Repeater = value
+}
 
 func ReadCSVChunks(filePath string, chunkSize int, channel chan interface{}) error {
 	file, err := os.Open(filePath)
@@ -57,32 +72,33 @@ func ReadCSVChunks(filePath string, chunkSize int, channel chan interface{}) err
 	return nil
 }
 
-func ReadCSV(filePath string, chunkSize int, channel chan interface{}, wg *sync.WaitGroup) error {
-	wg.Add(1)
+func ReadCSV(filePath string, channel chan<- interface{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	file, err := os.Open(filePath)
-	if err != nil {
-		return fmt.Errorf("could not open file: %v", err)
-	}
-	defer file.Close()
-
-	// Create a CSV reader
-	reader := csv.NewReader(file)
-
 	rowCount := 0
-	for {
-		rec, err := reader.Read()
-		if err == io.EOF {
-			break
-		}
+	for i := 0; i < Repeater; i++ {
+		file, err := os.Open(filePath)
 		if err != nil {
-			log.Fatal(err)
+			log.Fatalf("could not open file: %v", err)
+			return
 		}
-		channel <- rec
-		fmt.Printf("%+v\n", rec)
+
+		reader := csv.NewReader(file)
+		for {
+			rec, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatal(err)
+			}
+			channel <- rec
+			rowCount++
+		}
+
+		file.Close()
 	}
 
-	log.Printf("Total rows processed: %d\n", rowCount)
-	return nil
+	log.Printf("Total rows Loaded: %d\n", rowCount)
+	close(channel)
 }
