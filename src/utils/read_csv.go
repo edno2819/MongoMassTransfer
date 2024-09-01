@@ -3,11 +3,13 @@ package utils
 import (
 	"encoding/csv"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"sync"
 )
 
-func ReadCSVInChunks(filePath string, chunkSize int) error {
+func ReadCSVChunks(filePath string, chunkSize int, channel chan interface{}) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return fmt.Errorf("could not open file: %v", err)
@@ -49,6 +51,36 @@ func ReadCSVInChunks(filePath string, chunkSize int) error {
 		if len(chunk) < chunkSize {
 			break
 		}
+	}
+
+	log.Printf("Total rows processed: %d\n", rowCount)
+	return nil
+}
+
+func ReadCSV(filePath string, chunkSize int, channel chan interface{}, wg *sync.WaitGroup) error {
+	wg.Add(1)
+	defer wg.Done()
+
+	file, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("could not open file: %v", err)
+	}
+	defer file.Close()
+
+	// Create a CSV reader
+	reader := csv.NewReader(file)
+
+	rowCount := 0
+	for {
+		rec, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			log.Fatal(err)
+		}
+		channel <- rec
+		fmt.Printf("%+v\n", rec)
 	}
 
 	log.Printf("Total rows processed: %d\n", rowCount)
